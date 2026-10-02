@@ -1,0 +1,15 @@
+# Search framework
+hydra-core==1.3.2
+omegaconf==2.3.0
+litellm==1.55.12
+tiktoken==0.8.0
+numpy==1.26.3
+scipy==1.11.4
+
+# Problem evaluators
+torch==2.5.1
+numba==0.60.0
+tqdm==4.66.3
+
+# Optional: exact KP solver used by problems/kp_constructive/ora.py
+# ortools

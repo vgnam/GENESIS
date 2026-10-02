@@ -1,0 +1,36 @@
+defaults:
+  - _self_
+  - problem: tsp_aco
+
+hydra:
+  job:
+    chdir: True
+  run:
+    dir: outputs/${problem.problem_name}-${problem.problem_type}/${now:%Y-%m-%d_%H-%M-%S}
+
+# === LLM (any LiteLLM model string; set the provider's API key as an environment variable) ===
+model: mistral/codestral-2508
+temperature: 1.0
+
+# === Search budget ===
+max_fe: 500           # maximum number of heuristic evaluations (paper: 500 for ACO, 1000 for constructive)
+init_pop_size: 5      # N_0: number of initial heuristics
+pop_size: 30          # size of the elite population used as operator context
+n_children: 3         # heuristics generated per expansion (+1 refined by AGRE, i.e. N = 4)
+max_depth: 10         # maximum tree depth
+timeout: 60           # seconds allowed for evaluating one heuristic
+seed: 2024
+
+# === Ablation switches (all true = full GENESIS) ===
+# e.g. python main.py ablation.global_sharing=false
+ablation:
+  posterior_sampling: true     # false: deterministic UCB on posterior means instead of Thompson sampling
+  adaptive_op_selection: true  # false: operator drawn uniformly at random once expansion is chosen
+  global_sharing: true         # false: operator nodes use a fixed prior, no global hyper-posterior
+  ucb_c: 1.0                   # exploration constant, only used when posterior_sampling=false
+  agre: true                   # false: skip the AGRE refinement step entirely
+  agre_stages:                 # individual AGRE stages (only used when agre=true)
+    counterfactual: true
+    role_conflict: true
+    abstraction: true
+    assumption_repair: true
