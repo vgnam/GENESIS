@@ -154,7 +154,7 @@ class Genesis:
         while self.eval_times < self.fe_max:
             logging.info(f"Current objectives in tree: {[round(float(x), 2) for x in tree.rank_list]}")
 
-            target_node, _, (model_name, op) = tree.select_expansion_target(fe=self.eval_times)
+            target_node, _, (model_name, op) = tree.select_expansion_target()
             logging.info(f"Iter: {self.eval_times}/{self.fe_max}, Operator: {op}, LLM: {model_name}")
 
             nodes_set = self.expand(tree, target_node, nodes_set, op, model_name)

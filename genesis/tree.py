@@ -111,7 +111,6 @@ class OperatorNode:
         self.tau2_post = global_hyper.tau2_post
 
         self.rewards = []
-        self._lambda = 1.2  # rate of the budget-dependent score scaling, see HeuristicNode.gen_score
         self.depth = getattr(parent, "depth", 0) + 1
 
     def update_posterior(self, new_reward, global_hyper):
@@ -163,7 +162,9 @@ class HeuristicNode:
         self.children.append(child_node)
 
     def sample_from_node_posterior(self):
-        return nig_sample(self.mu_post, self.kappa_post, self.nu_post, self.tau2_post)[0]
+        """theta ~ N(mu, sigma2) with (mu, sigma2) ~ NIG of this node."""
+        mu, sigma2 = nig_sample(self.mu_post, self.kappa_post, self.nu_post, self.tau2_post)
+        return norm.rvs(loc=mu, scale=math.sqrt(sigma2))
 
     def update_node_posterior(self, new_reward):
         self.node_rewards.append(float(new_reward))
@@ -184,32 +185,46 @@ class HeuristicNode:
             candidates.append(('CONT', i, score))
         return candidates
 
-    def gen_score(self, gen_node, fe, global_params, ablation):
-        """Score one operator node (GEN action); lower is better."""
-        local_precision = gen_node.kappa_post / gen_node.tau2_post
+    def gen_score(self, gen_node, global_params, ablation):
+        """
+        Score one operator node (GEN action); lower is better.
+        (mu_g, sigma2_g) ~ NIG_g is combined with the global sample (mu_0, sigma2_0) by precision weighting:
+            lambda = (kappa_g / sigma2_g) / (kappa_g / sigma2_g + kappa_0 / sigma2_0)
+            mu     = lambda * mu_g + (1 - lambda) * mu_0
+            sigma2 = 1 / (kappa_g / sigma2_g + kappa_0 / sigma2_0)
+            theta  ~ N(mu, sigma2)
+        Without posterior sampling, posterior point estimates replace the samples.
+        """
+        if ablation.posterior_sampling:
+            mu_local, sigma2_local = nig_sample(gen_node.mu_post, gen_node.kappa_post,
+                                                gen_node.nu_post, gen_node.tau2_post)
+        else:
+            mu_local, sigma2_local = gen_node.mu_post, gen_node.tau2_post
+        local_precision = gen_node.kappa_post / sigma2_local
+
         if ablation.global_sharing:
-            # Shrink the local posterior towards the sampled global belief (precision = kappa / sigma2)
             mu_global, sigma2_global = global_params
             global_precision = self.global_hyper.kappa_post / sigma2_global
-            combined_precision = local_precision + 0.5 * global_precision
-            combined_mu = (gen_node.mu_post * local_precision + mu_global * global_precision) / combined_precision
         else:
-            combined_precision = local_precision
-            combined_mu = gen_node.mu_post
+            # lambda = 1: the operator node relies on its local posterior only
+            mu_global, global_precision = 0.0, 0.0
+
+        combined_precision = local_precision + global_precision
+        lam = local_precision / combined_precision
+        combined_mu = lam * mu_local + (1 - lam) * mu_global
 
         if ablation.posterior_sampling:
             value = norm.rvs(loc=combined_mu, scale=np.sqrt(1.0 / combined_precision))
         else:
             value = lcb_score(combined_mu, gen_node.visits, self.visits, np.sqrt(self.tau2_post), ablation.ucb_c)
 
-        # Budget-dependent scaling: as evaluations (fe) accumulate, GEN scores grow and CONT is favoured
-        score = value * math.exp(gen_node._lambda * fe / 1000)
+        score = value
 
         logging.debug(f"GEN {gen_node.operator_name}: mu_post={gen_node.mu_post:.3f}, tau2={gen_node.tau2_post:.3f}, "
                       f"combined_mu={combined_mu:.3f}, value={value:.3f}, score={score:.3f}")
         return score
 
-    def hierarchical_thompson_sampling(self, fe, num_samples=1, ablation=None):
+    def hierarchical_thompson_sampling(self, num_samples=1, ablation=None):
         """
         Hierarchical Thompson sampling over GEN and CONT actions:
         1. sample the global hyperparameter phi ~ p(phi | D);
@@ -227,7 +242,7 @@ class HeuristicNode:
 
         gen_candidates = []
         for gen_node in self.gen_nodes:
-            score = self.gen_score(gen_node, fe, global_params, ablation)
+            score = self.gen_score(gen_node, global_params, ablation)
             gen_candidates.append(('GEN', (gen_node.llm_model_name, gen_node.operator_name), score))
 
         if gen_candidates and not ablation.adaptive_op_selection:
@@ -239,11 +254,11 @@ class HeuristicNode:
         candidates = gen_candidates + self.cont_candidates(num_samples, ablation)
         return min(candidates, key=lambda x: x[2])
 
-    def select_action(self, fe, num_samples=1, ablation=None):
+    def select_action(self, num_samples=1, ablation=None):
         """Return ('GEN', (llm, operator), score) or ('CONT', child_index, score)."""
         if len(self.children) >= MAX_CHILDREN:
             return min(self.cont_candidates(num_samples, ablation), key=lambda x: x[2])
-        return self.hierarchical_thompson_sampling(fe, num_samples, ablation)
+        return self.hierarchical_thompson_sampling(num_samples, ablation)
 
 
 class GenesisTree:
@@ -277,7 +292,7 @@ class GenesisTree:
         node._generation_action = model_name
         return node
 
-    def select_expansion_target(self, fe):
+    def select_expansion_target(self):
         """Descend from the root and return (node, 'GEN', (llm_name, operator)) to expand."""
         current_node = self.root
 
@@ -287,7 +302,7 @@ class GenesisTree:
             current_node = current_node.children[best[1]]
 
         while current_node.depth < self.max_depth:
-            action_type, action_info, _ = current_node.select_action(fe=fe, ablation=self.ablation)
+            action_type, action_info, _ = current_node.select_action(ablation=self.ablation)
             if action_type == 'GEN' or not current_node.children:
                 return current_node, action_type, action_info
             current_node = current_node.children[action_info]

@@ -4,9 +4,13 @@
 
 ### Generative Exploration via Stochastic Inference in Monte Carlo Tree Search for Automatic Heuristic Design
 
-**ML × OR Workshop @ NeurIPS 2026**
+**Accepted at the NeurIPS 2026 Workshop on Machine Learning and Operations Research (ML × OR)**
 
 </div>
+
+## News
+
+- **2026**: GENESIS has been accepted at the **NeurIPS 2026 ML × OR Workshop**. 🎉
 
 GENESIS is an uncertainty-aware Monte Carlo Tree Search framework for **LLM-based automatic heuristic design (AHD)**. An LLM writes heuristic functions for NP-hard combinatorial optimization problems (TSP, CVRP, knapsack, bin packing, ...). The performance of these heuristics behaves like samples from a high-variance stochastic process. GENESIS models this noise with Bayesian beliefs instead of averaging it away. This keeps the search from over-committing to fragile candidates and helps it surface robust ones.
 
